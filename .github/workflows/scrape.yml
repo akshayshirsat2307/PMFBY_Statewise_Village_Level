@@ -1,0 +1,116 @@
+# Save this file as: .github/workflows/scrape.yml  (in your repo root)
+#
+# Runs pmfby_scraper.py with filters you choose at trigger time, and uploads
+# the resulting CSV as a downloadable workflow artifact. Optionally commits
+# the CSV back into the repo (see the last step — commented out by default).
+
+name: PMFBY Dashboard Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      year: 
+        description: "Year (e.g. 2025)"
+        required: true
+        default: "2025"
+      season:
+        description: "Season"
+        required: true
+        default: "Kharif"
+        type: choice
+        options:
+          - Kharif
+          - Rabi
+      scheme:
+        description: "Scheme"
+        required: true
+        default: "PMFBY"
+        type: choice
+        options:
+          - PMFBY
+          - WBCIS
+      state: 
+        description: "State (e.g. Andhra Pradesh)"
+        required: true
+      district: 
+        description: "District (optional)"
+        required: false
+        default: ""
+      mandal:
+        description: "Mandal (optional)"
+        required: false
+        default: ""
+      grampanchayat:
+        description: "Grampanchayat (optional, requires mandal)"
+        required: false
+        default: ""
+      village:
+        description: "Village (optional, requires grampanchayat)"
+        required: false
+        default: ""
+      drill_to_village:
+        description: "Walk every GP + Village under the given Mandal automatically"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # village-level drilling over a whole mandal can take a while
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        # Selenium 4.6+ has built-in Selenium Manager, which auto-downloads
+        # the matching chromedriver — no separate chromedriver step needed.
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build scraper arguments
+        id: args
+        shell: bash
+        run: |
+          ARGS="--year '${{ inputs.year }}' --season '${{ inputs.season }}' --scheme '${{ inputs.scheme }}' --state '${{ inputs.state }}'"
+          if [ -n "${{ inputs.district }}" ]; then ARGS="$ARGS --district '${{ inputs.district }}'"; fi
+          if [ -n "${{ inputs.mandal }}" ]; then ARGS="$ARGS --mandal '${{ inputs.mandal }}'"; fi
+          if [ -n "${{ inputs.grampanchayat }}" ]; then ARGS="$ARGS --grampanchayat '${{ inputs.grampanchayat }}'"; fi
+          if [ -n "${{ inputs.village }}" ]; then ARGS="$ARGS --village '${{ inputs.village }}'"; fi
+          if [ "${{ inputs.drill_to_village }}" = "true" ]; then ARGS="$ARGS --drill-to-village"; fi
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
+      - name: Run scraper
+        run: |
+          eval python pmfby_scraper.py ${{ steps.args.outputs.args }} --output pmfby_district_data.csv
+
+      - name: Upload result as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmfby-data-${{ inputs.year }}-${{ inputs.season }}-${{ inputs.state }}
+          path: pmfby_district_data.csv
+          retention-days: 30
+
+      # Optional: commit the CSV back into the repo instead of (or in
+      # addition to) the artifact upload above. Uncomment to enable —
+      # requires the workflow to have "contents: write" permission
+      # (Settings -> Actions -> General -> Workflow permissions).
+      #
+      # - name: Commit updated CSV back to repo
+      #   run: |
+      #     git config user.name "github-actions[bot]"
+      #     git config user.email "github-actions[bot]@users.noreply.github.com"
+      #     git add pmfby_district_data.csv
+      #     git commit -m "Update PMFBY data: ${{ inputs.year }} ${{ inputs.season }} ${{ inputs.state }}" || echo "No changes to commit"
+      #     git push
