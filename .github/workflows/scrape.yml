@@ -30,5 +30,5 @@ jobs:
 
       - name: Run scraper
         run: |
-          python PMFBY_Dashboard_State_Data_Download_v2.py \
-            --year 2025 --season Kharif --scheme PMFBY --drill-to-district
+          python pmfby_scraper_dashboard.py \
+            --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
