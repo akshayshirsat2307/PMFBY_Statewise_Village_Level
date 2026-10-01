@@ -2,13 +2,13 @@
 #### This code working fine for downloading district level data from PMFBY dashboard: https://pmfby.gov.in/adminStatistics/dashboard
 
 # # auto-named: pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
-# python .\PMFBY_Dashboard_State_Data_Download_v2.py --year 2025 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
+# python .\pmfby_scraper_dashboard.py --year 2025 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
 
 # # auto-named per state: pmfby_<STATE>_2025_Kharif_PMFBY.csv for every state
-# python .\PMFBY_Dashboard_State_Data_Download_v2.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district
+# python .\pmfby_scraper_dashboard.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district
 
-# # force everything into one shared file instead--- not worling properly sometimes
-# python .\PMFBY_Dashboard_State_Data_Download_v2.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+# # force everything into one shared file instead
+# python .\pmfby_scraper_dashboard.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output download_dashboard/all_states.csv
 
 
 
@@ -26,8 +26,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-DOWNLOAD_DIR = "."  # Directory to save CSV files
-# MASTER_CSV = "pmfby_district_data_28Sept26.csv"  # fallback name if no spec-based name applies
+DOWNLOAD_DIR = "download_dashboard"  # Directory to save CSV files
 
 
 def ensure_download_dir():
