@@ -2,9 +2,11 @@ name: PMFBY Scrape
 
 on:
   workflow_dispatch: {}
-  # or schedule:
-  # schedule:
-  #   - cron: "0 2 * * *"  # 02:00 UTC
+  schedule:
+    - cron: "0 2 * * 0"  # Every Sunday at 02:00 UTC
+
+permissions:
+  contents: write
 
 jobs:
   scrape:
@@ -28,7 +30,87 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run scraper
+      - name: Ensure download_dashboard directory exists
+        run: |
+          mkdir -p download_dashboard
+
+      - name: Run scraper (Attempt 1)
+        id: scrape_attempt_1
+        continue-on-error: true
         run: |
           python pmfby_scraper_dashboard.py \
             --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
+
+      - name: Run scraper (Attempt 2)
+        id: scrape_attempt_2
+        if: steps.scrape_attempt_1.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "First attempt failed, retrying..."
+          sleep 30
+          python pmfby_scraper_dashboard.py \
+            --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
+
+      - name: Run scraper (Attempt 3)
+        id: scrape_attempt_3
+        if: steps.scrape_attempt_2.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "Second attempt failed, retrying..."
+          sleep 60
+          python pmfby_scraper_dashboard.py \
+            --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
+
+      - name: Check if scrape succeeded
+        run: |
+          if [ "${{ steps.scrape_attempt_1.outcome }}" == "success" ] || \
+             [ "${{ steps.scrape_attempt_2.outcome }}" == "success" ] || \
+             [ "${{ steps.scrape_attempt_3.outcome }}" == "success" ]; then
+            echo "Scrape succeeded in one of the attempts"
+            exit 0
+          else
+            echo "All scrape attempts failed"
+            exit 1
+          fi
+
+      - name: Upload CSV files as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmfby-scraped-data
+          path: download_dashboard/
+          retention-days: 30
+
+      - name: Check for new/modified CSV files
+        id: check_files
+        run: |
+          if [ -n "$(git status --porcelain download_dashboard/)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push CSV files
+        if: steps.check_files.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add download_dashboard/
+          git commit -m "Update PMFBY scraped data - $(date '+%Y-%m-%d %H:%M:%S')"
+          git push
+
+      - name: Display scrape summary
+        if: always()
+        run: |
+          echo "=== Scrape Summary ==="
+          if [ -d "download_dashboard" ]; then
+            echo "CSV files generated:"
+            ls -lh download_dashboard/ || echo "No files found"
+          else
+            echo "download_dashboard folder not found"
+          fi
+
+      - name: Send failure notification
+        if: failure()
+        run: |
+          echo "::error::PMFBY scraper failed after 3 attempts"
