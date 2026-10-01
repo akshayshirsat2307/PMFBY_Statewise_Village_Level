@@ -26,7 +26,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
+DOWNLOAD_DIR = "download_dashboard"  # Directory to save CSV files
 MASTER_CSV = "pmfby_district_data_28Sept26.csv"  # fallback name if no spec-based name applies
+
+
+def ensure_download_dir():
+    """Ensure the download directory exists."""
+    if not os.path.exists(DOWNLOAD_DIR):
+        os.makedirs(DOWNLOAD_DIR)
 
 
 def sanitize_filename_part(text: str) -> str:
@@ -44,6 +51,7 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
          pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
     Falls back to a state-less name (state-level summary run) like:
          pmfby_2025_Kharif_PMFBY.csv
+    Returns the path with download_dashboard directory prefix.
     """
     parts = ["pmfby"]
     if spec.state:
@@ -55,7 +63,8 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
         sanitize_filename_part(spec.season),
         sanitize_filename_part(spec.scheme),
     ]
-    return "_".join(parts) + ".csv"
+    filename = "_".join(parts) + ".csv"
+    return os.path.join(DOWNLOAD_DIR, filename)
 
 # ---------------------------------------------------------------------------
 # SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
@@ -253,7 +262,7 @@ def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv
 def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path: Optional[str] = None):
     """
     csv_path=None (default): auto-name the CSV per run from spec fields —
-        pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv
+        pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv (saved to download_dashboard folder)
     csv_path="some_file.csv": use that exact name/path for every write
         instead (all states appended into one shared file when combined
         with --drill-to-district).
@@ -273,6 +282,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
         navigate_to(driver, spec)
         headers, rows = extract_table_rows(driver)
         out_path = csv_path or build_csv_filename(spec)
+        ensure_download_dir()
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
         print(f"Saved {len(rows)} rows for {label} -> {out_path}")
@@ -288,6 +298,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
         navigate_to(driver, state_spec)
         headers, rows = extract_table_rows(driver)
         out_path = csv_path or build_csv_filename(state_spec)
+        ensure_download_dir()
         append_rows(state_spec, headers, rows, csv_path=out_path)
         print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
 
@@ -312,7 +323,7 @@ def parse_args():
         "--output",
         default=None,
         help="CSV path to write to. If omitted, auto-generates a name like "
-             "pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv per state.",
+             "pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv per state in the download_dashboard folder.",
     )
     p.add_argument(
         "--headed",
