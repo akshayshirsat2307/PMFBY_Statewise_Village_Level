@@ -305,7 +305,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
             print(f"[ERROR] No data extracted for {spec.state or '(state-level summary)'}. Skipping.")
             return
         
-        out_path = csv_path or build_csv_filename(spec)
+        out_path = build_csv_filename(spec)
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
         print(f"✓ Saved {len(rows)} rows for {label} -> {out_path}")
@@ -329,7 +329,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
             print(f"  [SKIP] {state}: No data extracted")
             continue
         
-        out_path = csv_path or build_csv_filename(state_spec)
+        out_path = build_csv_filename(state_spec)
         append_rows(state_spec, headers, rows, csv_path=out_path)
         print(f"  ✓ {state}: {len(rows)} district rows -> {out_path}")
 
