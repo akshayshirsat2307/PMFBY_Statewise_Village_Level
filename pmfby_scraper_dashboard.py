@@ -26,7 +26,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-DOWNLOAD_DIR = "download_dashboard"  # Directory to save CSV files
+DOWNLOAD_DIR = "."  # Directory to save CSV files
 # MASTER_CSV = "pmfby_district_data_28Sept26.csv"  # fallback name if no spec-based name applies
 
 
