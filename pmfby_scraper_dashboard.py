@@ -203,6 +203,7 @@ def extract_table_rows(driver):
     try:
         wait_visible(driver, SELECTORS["results_table"])
     except TimeoutException:
+        print("[WARNING] Table not found within timeout. Check selectors or page load.")
         return [], []
 
     time.sleep(1)
@@ -217,6 +218,7 @@ def extract_table_rows(driver):
 
     tbody = soup.find("tbody")
     if not tbody:
+        print("[WARNING] No tbody found in table. Table may be empty or structure has changed.")
         return headers, []
 
     rows = []
@@ -239,11 +241,26 @@ def row_names(driver) -> List[str]:
 # ---------------------------------------------------------------------------
 # CSV writer
 # ---------------------------------------------------------------------------
-def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv_path=MASTER_CSV):
+def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv_path: str):
+    """
+    Append rows to a CSV file.
+    
+    Args:
+        spec: FilterSpec with year, season, scheme, state
+        headers: Column headers from the table
+        rows: Data rows to append
+        csv_path: Full path to the CSV file (required - no default)
+    """
     meta_cols = ["Year", "Season", "Scheme", "State (selected)"]
     meta_vals = [spec.year, spec.season, spec.scheme, spec.state or ""]
 
     file_exists = os.path.exists(csv_path)
+    
+    # Validation: check if we have data to write
+    if not rows:
+        print(f"[WARNING] No rows to write to {csv_path}")
+        return
+    
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not file_exists:
@@ -278,14 +295,20 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
           district-level table (one CSV per state, auto-named, unless
           csv_path was explicitly given).
     """
+    ensure_download_dir()
+    
     if not drill_to_district:
         navigate_to(driver, spec)
         headers, rows = extract_table_rows(driver)
+        
+        if not rows:
+            print(f"[ERROR] No data extracted for {spec.state or '(state-level summary)'}. Skipping.")
+            return
+        
         out_path = csv_path or build_csv_filename(spec)
-        ensure_download_dir()
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
-        print(f"Saved {len(rows)} rows for {label} -> {out_path}")
+        print(f"✓ Saved {len(rows)} rows for {label} -> {out_path}")
         return
 
     base_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=None)
@@ -293,14 +316,22 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
     state_names = row_names(driver)
     print(f"Found {len(state_names)} states")
 
+    if not state_names:
+        print("[ERROR] No states found. Check page selectors or network connectivity.")
+        return
+
     for state in state_names:
         state_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=state)
         navigate_to(driver, state_spec)
         headers, rows = extract_table_rows(driver)
+        
+        if not rows:
+            print(f"  [SKIP] {state}: No data extracted")
+            continue
+        
         out_path = csv_path or build_csv_filename(state_spec)
-        ensure_download_dir()
         append_rows(state_spec, headers, rows, csv_path=out_path)
-        print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
+        print(f"  ✓ {state}: {len(rows)} district rows -> {out_path}")
 
 
 # ---------------------------------------------------------------------------
