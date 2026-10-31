@@ -5,86 +5,98 @@ permissions:
 
 on:
   schedule:
-    # Runs every day at 11:00 IST (01:30 UTC)
-    - cron: '30 4 * * *'
-
+    - cron: "30 4 * * *"
   workflow_dispatch:
 
 jobs:
-
   download:
-
     runs-on: ubuntu-latest
 
     steps:
-
-      # ==========================================
-      # Checkout repository
-      # ==========================================
-
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-
-      # ==========================================
-      # Setup Python
-      # ==========================================
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-
-      # ==========================================
-      # Install Linux packages required by Camelot
-      # ==========================================
-
       - name: Install System Packages
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            chromium \
+            chromium-driver \
             ghostscript \
             python3-tk \
             libgl1
-
-
-      # ==========================================
-      # Install Python packages
-      # ==========================================
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-
-      # ==========================================
-      # Show repository structure
-      # ==========================================
-
-      - name: Show Repository Files
+      - name: Verify browser is usable
+        env:
+          CHROME_BIN: /usr/bin/chromium
         run: |
-          pwd
-          ls -R
+          python - <<'PY'
+          import os
+          from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.chrome.service import Service
 
+          chrome_bin = os.environ.get("CHROME_BIN") or "/usr/bin/chromium"
+          if not os.path.exists(chrome_bin):
+              raise SystemExit(f"Chrome binary not found: {chrome_bin}")
 
-      # ==========================================
-      # Run IMD download and conversion script
-      # ==========================================
+          opts = Options()
+          opts.binary_location = chrome_bin
+          opts.add_argument("--headless=new")
+          opts.add_argument("--no-sandbox")
+          opts.add_argument("--disable-dev-shm-usage")
+          opts.add_argument("--disable-gpu")
+          opts.add_argument("--window-size=1400,1000")
+
+          driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=opts)
+          print("Browser startup check passed.")
+          driver.quit()
+          PY
 
       - name: Run Download Dashboard Data
+        env:
+          CHROME_BIN: /usr/bin/chromium
         run: |
+          set -e
           mkdir -p downloads
-          python pmfby_scraper_dashboard.py \
-            --year 2026 \
-            --season Kharif \
-            --scheme PMFBY \
-            --drill-to-district \
-            --output downloads/all_states.csv
+
+          ATTEMPTS=3
+          for i in $(seq 1 $ATTEMPTS); do
+            echo "Scrape attempt $i/$ATTEMPTS"
+            if python pmfby_scraper_dashboard.py \
+              --year 2026 \
+              --season Kharif \
+              --scheme PMFBY \
+              --drill-to-district \
+              --output downloads/all_states.csv; then
+              echo "Scrape succeeded"
+              exit 0
+            fi
+            echo "Scrape failed on attempt $i; retrying..."
+            sleep 15
+          done
+
+          echo "Scrape failed after $ATTEMPTS attempts"
+          exit 1
+
+      - name: Ensure correct branch
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch origin
+          git checkout "${GITHUB_REF_NAME:-main}"
 
       - name: Commit Downloaded Files
         run: |
@@ -97,209 +109,19 @@ jobs:
           fi
 
           git add downloads/
+
           if git diff --cached --quiet; then
             echo "No new files to commit."
             exit 0
           fi
 
           git commit -m "Daily PMFBY Update $(date +'%Y-%m-%d')"
-          git push
 
-      # ==========================================
-      # Send Email
-      # ==========================================
-
-      # - name: Send Daily IMD Email
-      #   env:
-      #     SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
-      #     SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-      #   run: |
-      #     python mail_daily_district_rain.py
-
-
-      # ==========================================
-      # Commit newly downloaded files
-      # ==========================================
-
-      - name: Commit Downloaded Files
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add downloads/
-
-          if git diff --cached --quiet; then
-            echo "No new files to commit."
-            exit 0
-          fi
-
-          git commit -m "Daily IMD Update $(date +'%Y-%m-%d')"
-          git push
-
-
-      # ==========================================
-      # Upload downloads as workflow artifact
-      # ==========================================
+          git push origin HEAD:"${GITHUB_REF_NAME:-main}"
 
       - name: Upload Downloads
         uses: actions/upload-artifact@v4
         with:
-          name: PMFBY Dashboad Data
+          name: PMFBY Dashboard Data
           path: downloads/
           retention-days: 30
-
-# name: PMFBY Scrape
-
-# permissions:
-#   contents: write
-
-# on:
-#   schedule:
-#     - cron: "0 2 * * 0"  # Every Sunday at 02:00 UTC
-#   workflow_dispatch:
-
-# jobs:
-#   pmfby_dashboard_scrape:
-#     runs-on: ubuntu-latest
-
-#     steps:
-#       - name: Check out repo
-#         uses: actions/checkout@v4
-
-#       - name: Set up Python
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: "3.11"
-
-#       - name: Install system dependencies (Chrome)
-#         run: |
-#           sudo apt-get update
-#           sudo apt-get install -y google-chrome-stable || true
-
-#       - name: Install Python dependencies
-#         run: |
-#           pip install -r requirements.txt
-
-#       - name: Show Repository Files
-#         run: |
-#           pwd
-#           ls -la
-
-#       - name: Ensure download_dashboard directory exists
-#         run: |
-#           mkdir -p download_dashboard
-#           echo "Directory created/verified"
-#           ls -la download_dashboard/
-
-#       - name: Run scraper (Attempt 1)
-#         id: scrape_attempt_1
-#         continue-on-error: true
-#         run: |
-#           python pmfby_scraper_dashboard.py \
-#             --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
-#           echo "Attempt 1 completed"
-#           ls -lh download_dashboard/ || echo "Folder is empty"
-
-#       - name: Run scraper (Attempt 2)
-#         id: scrape_attempt_2
-#         if: steps.scrape_attempt_1.outcome == 'failure'
-#         continue-on-error: true
-#         run: |
-#           echo "First attempt failed, retrying..."
-#           sleep 30
-#           python pmfby_scraper_dashboard.py \
-#             --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
-#           echo "Attempt 2 completed"
-#           ls -lh download_dashboard/ || echo "Folder is empty"
-
-#       - name: Run scraper (Attempt 3)
-#         id: scrape_attempt_3
-#         if: steps.scrape_attempt_2.outcome == 'failure'
-#         continue-on-error: true
-#         run: |
-#           echo "Second attempt failed, retrying..."
-#           sleep 60
-#           python pmfby_scraper_dashboard.py \
-#             --year 2026 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
-#           echo "Attempt 3 completed"
-#           ls -lh download_dashboard/ || echo "Folder is empty"
-
-#       - name: Check if scrape succeeded
-#         run: |
-#           if [ "${{ steps.scrape_attempt_1.outcome }}" == "success" ] || \
-#              [ "${{ steps.scrape_attempt_2.outcome }}" == "success" ] || \
-#              [ "${{ steps.scrape_attempt_3.outcome }}" == "success" ]; then
-#             echo "✓ Scrape succeeded in one of the attempts"
-#             exit 0
-#           else
-#             echo "✗ All scrape attempts failed"
-#             exit 1
-#           fi
-
-#       - name: Display scrape summary
-#         if: always()
-#         run: |
-#           echo "=== Scrape Summary ==="
-#           if [ -d "download_dashboard" ]; then
-#             echo "CSV files generated:"
-#             if [ -z "$(ls -A download_dashboard/)" ]; then
-#               echo "  [EMPTY] No files found in download_dashboard"
-#             else
-#               ls -lh download_dashboard/
-#               echo ""
-#               echo "Total files: $(ls -1 download_dashboard/ | wc -l)"
-#             fi
-#           else
-#             echo "✗ download_dashboard folder not found"
-#           fi
-
-#       - name: Upload CSV files as artifacts
-#         if: always()
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: pmfby-scraped-data
-#           path: download_dashboard/
-#           retention-days: 30
-#           if-no-files-found: ignore
-
-#       - name: Check for new/modified CSV files
-#         id: check_files
-#         run: |
-#           echo "Checking git status for download_dashboard/"
-#           git status download_dashboard/ || true
-
-#           if [ -n "$(find download_dashboard/ -type f 2>/dev/null)" ]; then
-#             echo "Files found in download_dashboard"
-#             if [ -n "$(git status --porcelain download_dashboard/ 2>/dev/null)" ]; then
-#               echo "has_changes=true" >> $GITHUB_OUTPUT
-#               echo "New/modified files detected"
-#             else
-#               echo "has_changes=false" >> $GITHUB_OUTPUT
-#               echo "No changes detected (files may already be tracked)"
-#             fi
-#           else
-#             echo "has_changes=false" >> $GITHUB_OUTPUT
-#             echo "No files in download_dashboard"
-#           fi
-
-#       - name: Commit and push CSV files
-#         if: steps.check_files.outputs.has_changes == 'true'
-#         run: |
-#           git config --local user.email "action@github.com"
-#           git config --local user.name "GitHub Action"
-
-#           echo "Adding download_dashboard/ to git"
-#           git add download_dashboard/
-
-#           echo "Committing changes"
-#           git commit -m "Update PMFBY scraped data - $(date '+%Y-%m-%d %H:%M:%S')"
-
-#           echo "Pushing to repository"
-#           git push
-
-#           echo "✓ Files committed and pushed successfully"
-
-#       - name: Send failure notification
-#         if: failure()
-#         run: |
-#           echo "::error::PMFBY scraper workflow failed after 3 attempts"
