@@ -6,10 +6,12 @@ from typing import Optional, List
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
 OUTPUT_DIR = os.path.abspath(os.path.join(os.getcwd(), "downloads"))
@@ -44,6 +46,7 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
         sanitize_filename_part(spec.scheme),
     ]
     return os.path.abspath(os.path.join(OUTPUT_DIR, "_".join(parts) + ".csv"))
+
 
 # ---------------------------------------------------------------------------
 # SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
@@ -92,13 +95,32 @@ class FilterSpec:
 # ---------------------------------------------------------------------------
 def make_driver(headless: bool = True):
     from selenium.webdriver.chrome.options import Options
+
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
+
+    chrome_bin = os.environ.get("CHROME_BIN")
+    if chrome_bin and os.path.exists(chrome_bin):
+        opts.binary_location = chrome_bin
+    elif os.path.exists("/usr/bin/chromium"):
+        opts.binary_location = "/usr/bin/chromium"
+    elif os.path.exists("/usr/bin/google-chrome"):
+        opts.binary_location = "/usr/bin/google-chrome"
+    else:
+        raise RuntimeError("No Chrome/Chromium binary found in the runner.")
+
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-software-rasterizer")
     opts.add_argument("--window-size=1400,1000")
-    driver = webdriver.Chrome(options=opts)
+
+    driver_path = "/usr/bin/chromedriver"
+    if not os.path.exists(driver_path):
+        driver_path = ChromeDriverManager().install()
+
+    driver = webdriver.Chrome(service=Service(driver_path), options=opts)
     driver.implicitly_wait(3)
     return driver
 
@@ -266,6 +288,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
         out_path = csv_path or build_csv_filename(state_spec)
         append_rows(state_spec, headers, rows, csv_path=out_path)
         print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
+
 
 # ---------------------------------------------------------------------------
 # CLI
