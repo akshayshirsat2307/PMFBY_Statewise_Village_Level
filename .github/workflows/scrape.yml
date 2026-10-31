@@ -73,12 +73,12 @@ jobs:
 
 
       # ==========================================
-      # Run IMD download and conversion script
+      # Run PMFBY Dashboard download and conversion script
       # ==========================================
 
       - name: Run Weekly PMFBY Download Script
         run: |
-          python pmfby_scraper_dashboard.py.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+          python pmfby_scraper_dashboard.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
 
 
       # ==========================================
