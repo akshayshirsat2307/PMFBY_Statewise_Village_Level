@@ -12,7 +12,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-MASTER_CSV = os.path.abspath(os.path.join(os.getcwd(), "pmfby_district_data_AP_29Oct26.csv"))  # fallback name if no spec-based name applies
+OUTPUT_DIR = os.path.abspath(os.path.join(os.getcwd(), "downloads"))
+MASTER_CSV = os.path.abspath(os.path.join(OUTPUT_DIR, "pmfby_district_data_AP_29Oct26.csv"))  # fallback name if no spec-based name applies
 
 
 def sanitize_filename_part(text: str) -> str:
@@ -25,12 +26,13 @@ def sanitize_filename_part(text: str) -> str:
 
 def build_csv_filename(spec, district: Optional[str] = None) -> str:
     """Builds a filename like:
-         pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
+          pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
     or, if a single district is also known:
-         pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
+          pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
     Falls back to a state-less name (state-level summary run) like:
-         pmfby_2025_Kharif_PMFBY.csv
+          pmfby_2025_Kharif_PMFBY.csv
     """
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     parts = ["pmfby"]
     if spec.state:
         parts.append(sanitize_filename_part(spec.state))
@@ -41,7 +43,7 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
         sanitize_filename_part(spec.season),
         sanitize_filename_part(spec.scheme),
     ]
-    return os.path.abspath(os.path.join(os.getcwd(), "_".join(parts) + ".csv"))
+    return os.path.abspath(os.path.join(OUTPUT_DIR, "_".join(parts) + ".csv"))
 
 # ---------------------------------------------------------------------------
 # SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
