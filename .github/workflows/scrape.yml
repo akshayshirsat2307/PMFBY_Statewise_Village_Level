@@ -78,8 +78,7 @@ jobs:
 
       - name: Run Download Dashboard Data
         run: |
-          python pmfby_scraper_dashboard.py \
-#             --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+          python pmfby_scraper_dashboard.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
 
 
       # ==========================================
