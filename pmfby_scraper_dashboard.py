@@ -1,17 +1,3 @@
-
-#### This code working fine for downloading district level data from PMFBY dashboard: https://pmfby.gov.in/adminStatistics/dashboard
-
-# # auto-named: pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
-# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
-
-# # auto-named per state: pmfby_<STATE>_2025_Kharif_PMFBY.csv for every state
-# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district
-
-# # force everything into one shared file instead--- not worling properly sometimes
-# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
-
-
-
 import csv
 import os
 import time
@@ -26,7 +12,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-MASTER_CSV = "pmfby_district_data_AP_29Oct26.csv"  # fallback name if no spec-based name applies
+MASTER_CSV = os.path.abspath(os.path.join(os.getcwd(), "pmfby_district_data_AP_29Oct26.csv"))  # fallback name if no spec-based name applies
 
 
 def sanitize_filename_part(text: str) -> str:
@@ -55,7 +41,7 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
         sanitize_filename_part(spec.season),
         sanitize_filename_part(spec.scheme),
     ]
-    return "_".join(parts) + ".csv"
+    return os.path.abspath(os.path.join(os.getcwd(), "_".join(parts) + ".csv"))
 
 # ---------------------------------------------------------------------------
 # SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
@@ -234,6 +220,10 @@ def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv
     meta_cols = ["Year", "Season", "Scheme", "State (selected)"]
     meta_vals = [spec.year, spec.season, spec.scheme, spec.state or ""]
 
+    directory = os.path.dirname(csv_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
     file_exists = os.path.exists(csv_path)
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -254,7 +244,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
     if not drill_to_district:
         navigate_to(driver, spec)
         headers, rows = extract_table_rows(driver)
-        headers, rows = drop_grand_total(headers, rows)  # <-- add this line
+        headers, rows = drop_grand_total(headers, rows)
         out_path = csv_path or build_csv_filename(spec)
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
@@ -270,7 +260,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
         state_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=state)
         navigate_to(driver, state_spec)
         headers, rows = extract_table_rows(driver)
-        headers, rows = drop_grand_total(headers, rows)  # <-- and here
+        headers, rows = drop_grand_total(headers, rows)
         out_path = csv_path or build_csv_filename(state_spec)
         append_rows(state_spec, headers, rows, csv_path=out_path)
         print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
@@ -304,6 +294,7 @@ def parse_args():
     )
     return p.parse_args()
 
+
 def drop_grand_total(headers, rows):
     """Remove any row where the 'S. No' column has value 'Grand Total'."""
     try:
@@ -329,7 +320,7 @@ if __name__ == "__main__":
     driver = make_driver(headless=not args.headed)
     try:
         run_job(driver, spec, drill_to_district=args.drill_to_district, csv_path=args.output)
-        
+
     finally:
         driver.quit()
 
