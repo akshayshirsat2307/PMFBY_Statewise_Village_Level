@@ -78,18 +78,32 @@ jobs:
 
       - name: Run Download Dashboard Data
         run: |
-          python pmfby_scraper_dashboard.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+          mkdir -p downloads
+          python pmfby_scraper_dashboard.py \
+            --year 2026 \
+            --season Kharif \
+            --scheme PMFBY \
+            --drill-to-district \
+            --output downloads/all_states.csv
 
-
-      # ==========================================
-      # Show downloaded files
-      # ==========================================
-
-      - name: Show Downloaded Files
+      - name: Commit Downloaded Files
         run: |
-          echo "Files available in downloads folder:"
-          ls -lh downloads/
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          if [ ! -d downloads ] || [ -z "$(find downloads -type f 2>/dev/null)" ]; then
+            echo "No CSV files were generated in downloads/"
+            exit 0
+          fi
+
+          git add downloads/
+          if git diff --cached --quiet; then
+            echo "No new files to commit."
+            exit 0
+          fi
+
+          git commit -m "Daily PMFBY Update $(date +'%Y-%m-%d')"
+          git push
 
       # ==========================================
       # Send Email
