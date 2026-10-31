@@ -1,3 +1,17 @@
+
+#### This code working fine for downloading district level data from PMFBY dashboard: https://pmfby.gov.in/adminStatistics/dashboard
+
+# # auto-named: pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
+# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
+
+# # auto-named per state: pmfby_<STATE>_2025_Kharif_PMFBY.csv for every state
+# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district
+
+# # force everything into one shared file instead--- not worling properly sometimes
+# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+
+
+
 import csv
 import os
 import time
@@ -6,16 +20,13 @@ from typing import Optional, List
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-OUTPUT_DIR = os.path.abspath(os.path.join(os.getcwd(), "downloads"))
-MASTER_CSV = os.path.abspath(os.path.join(OUTPUT_DIR, "pmfby_district_data_AP_29Oct26.csv"))  # fallback name if no spec-based name applies
+MASTER_CSV = "pmfby_district_data_AP_29Oct26.csv"  # fallback name if no spec-based name applies
 
 
 def sanitize_filename_part(text: str) -> str:
@@ -28,13 +39,12 @@ def sanitize_filename_part(text: str) -> str:
 
 def build_csv_filename(spec, district: Optional[str] = None) -> str:
     """Builds a filename like:
-          pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
+         pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
     or, if a single district is also known:
-          pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
+         pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
     Falls back to a state-less name (state-level summary run) like:
-          pmfby_2025_Kharif_PMFBY.csv
+         pmfby_2025_Kharif_PMFBY.csv
     """
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
     parts = ["pmfby"]
     if spec.state:
         parts.append(sanitize_filename_part(spec.state))
@@ -45,8 +55,7 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
         sanitize_filename_part(spec.season),
         sanitize_filename_part(spec.scheme),
     ]
-    return os.path.abspath(os.path.join(OUTPUT_DIR, "_".join(parts) + ".csv"))
-
+    return "_".join(parts) + ".csv"
 
 # ---------------------------------------------------------------------------
 # SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
@@ -95,32 +104,13 @@ class FilterSpec:
 # ---------------------------------------------------------------------------
 def make_driver(headless: bool = True):
     from selenium.webdriver.chrome.options import Options
-
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
-
-    chrome_bin = os.environ.get("CHROME_BIN")
-    if chrome_bin and os.path.exists(chrome_bin):
-        opts.binary_location = chrome_bin
-    elif os.path.exists("/usr/bin/chromium"):
-        opts.binary_location = "/usr/bin/chromium"
-    elif os.path.exists("/usr/bin/google-chrome"):
-        opts.binary_location = "/usr/bin/google-chrome"
-    else:
-        raise RuntimeError("No Chrome/Chromium binary found in the runner.")
-
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--disable-software-rasterizer")
     opts.add_argument("--window-size=1400,1000")
-
-    driver_path = "/usr/bin/chromedriver"
-    if not os.path.exists(driver_path):
-        driver_path = ChromeDriverManager().install()
-
-    driver = webdriver.Chrome(service=Service(driver_path), options=opts)
+    driver = webdriver.Chrome(options=opts)
     driver.implicitly_wait(3)
     return driver
 
@@ -244,10 +234,6 @@ def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv
     meta_cols = ["Year", "Season", "Scheme", "State (selected)"]
     meta_vals = [spec.year, spec.season, spec.scheme, spec.state or ""]
 
-    directory = os.path.dirname(csv_path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
     file_exists = os.path.exists(csv_path)
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -268,7 +254,7 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
     if not drill_to_district:
         navigate_to(driver, spec)
         headers, rows = extract_table_rows(driver)
-        headers, rows = drop_grand_total(headers, rows)
+        headers, rows = drop_grand_total(headers, rows)  # <-- add this line
         out_path = csv_path or build_csv_filename(spec)
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
@@ -284,11 +270,10 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
         state_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=state)
         navigate_to(driver, state_spec)
         headers, rows = extract_table_rows(driver)
-        headers, rows = drop_grand_total(headers, rows)
+        headers, rows = drop_grand_total(headers, rows)  # <-- and here
         out_path = csv_path or build_csv_filename(state_spec)
         append_rows(state_spec, headers, rows, csv_path=out_path)
         print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
-
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -319,7 +304,6 @@ def parse_args():
     )
     return p.parse_args()
 
-
 def drop_grand_total(headers, rows):
     """Remove any row where the 'S. No' column has value 'Grand Total'."""
     try:
@@ -345,7 +329,7 @@ if __name__ == "__main__":
     driver = make_driver(headless=not args.headed)
     try:
         run_job(driver, spec, drill_to_district=args.drill_to_district, csv_path=args.output)
-
+        
     finally:
         driver.quit()
 
