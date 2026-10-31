@@ -1,112 +1,116 @@
-name: PMFBY Dahsboard Data Download
+name: PMFBY DATA DOWNLOAD
 
 permissions:
   contents: write
 
 on:
   schedule:
-    - cron: "30 4 * * *"
+    # Runs every day at 11:00 IST (01:30 UTC)
+    - cron: '0 3 * * *'  
+
   workflow_dispatch:
 
 jobs:
+
   download:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # ==========================================
+      # Checkout repository
+      # ==========================================
+
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
+
+      # ==========================================
+      # Setup Python
+      # ==========================================
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+
+      # ==========================================
+      # Install Linux packages required by Camelot
+      # ==========================================
+
       - name: Install System Packages
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            chromium \
-            chromium-driver \
             ghostscript \
             python3-tk \
             libgl1
+
+
+      # ==========================================
+      # Install Python packages
+      # ==========================================
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Verify browser is usable
+
+      # ==========================================
+      # Show repository structure
+      # ==========================================
+
+      - name: Show Repository Files
+        run: |
+          pwd
+          ls -R
+
+
+      # ==========================================
+      # Run IMD download and conversion script
+      # ==========================================
+
+      - name: Run Weekly PMFBY Download Script
+        run: |
+          python pmfby_scraper_dashboard.py.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+
+
+      # ==========================================
+      # Show downloaded files
+      # ==========================================
+
+      - name: Show Downloaded Files
+        run: |
+          echo "Files available in downloads folder:"
+          ls -lh downloads/
+
+
+      # ==========================================
+      # Send Email
+      # ==========================================
+
+      - name: Send Daily IMD Email
         env:
-          CHROME_BIN: /usr/bin/chromium
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         run: |
-          python - <<'PY'
-          import os
-          from selenium import webdriver
-          from selenium.webdriver.chrome.options import Options
-          from selenium.webdriver.chrome.service import Service
+          python mail_daily_district_rain.py
 
-          chrome_bin = os.environ.get("CHROME_BIN") or "/usr/bin/chromium"
-          if not os.path.exists(chrome_bin):
-              raise SystemExit(f"Chrome binary not found: {chrome_bin}")
 
-          opts = Options()
-          opts.binary_location = chrome_bin
-          opts.add_argument("--headless=new")
-          opts.add_argument("--no-sandbox")
-          opts.add_argument("--disable-dev-shm-usage")
-          opts.add_argument("--disable-gpu")
-          opts.add_argument("--window-size=1400,1000")
-
-          driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=opts)
-          print("Browser startup check passed.")
-          driver.quit()
-          PY
-
-      - name: Run Download Dashboard Data
-        env:
-          CHROME_BIN: /usr/bin/chromium
-        run: |
-          set -e
-          mkdir -p downloads
-
-          ATTEMPTS=3
-          for i in $(seq 1 $ATTEMPTS); do
-            echo "Scrape attempt $i/$ATTEMPTS"
-            if python pmfby_scraper_dashboard.py \
-              --year 2026 \
-              --season Kharif \
-              --scheme PMFBY \
-              --drill-to-district \
-              --output downloads/all_states.csv; then
-              echo "Scrape succeeded"
-              exit 0
-            fi
-            echo "Scrape failed on attempt $i; retrying..."
-            sleep 15
-          done
-
-          echo "Scrape failed after $ATTEMPTS attempts"
-          exit 1
-
-      - name: Ensure correct branch
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch origin
-          git checkout "${GITHUB_REF_NAME:-main}"
+      # ==========================================
+      # Commit newly downloaded files
+      # ==========================================
 
       - name: Commit Downloaded Files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [ ! -d downloads ] || [ -z "$(find downloads -type f 2>/dev/null)" ]; then
-            echo "No CSV files were generated in downloads/"
-            exit 0
-          fi
 
           git add downloads/
 
@@ -115,13 +119,17 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Daily PMFBY Update $(date +'%Y-%m-%d')"
+          git commit -m "Weekly PMFBY Update $(date +'%Y-%m-%d')"
+          git push
 
-          git push origin HEAD:"${GITHUB_REF_NAME:-main}"
+
+      # ==========================================
+      # Upload downloads as workflow artifact
+      # ==========================================
 
       - name: Upload Downloads
         uses: actions/upload-artifact@v4
         with:
-          name: PMFBY Dashboard Data
+          name: PMFBY_Downloads
           path: downloads/
-          retention-days: 30
+          retention-days: 360
