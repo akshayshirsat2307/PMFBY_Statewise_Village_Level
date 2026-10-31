@@ -2,13 +2,13 @@
 #### This code working fine for downloading district level data from PMFBY dashboard: https://pmfby.gov.in/adminStatistics/dashboard
 
 # # auto-named: pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
-# python .\pmfby_scraper_dashboard.py --year 2025 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
+# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --state "ANDHRA PRADESH"
 
 # # auto-named per state: pmfby_<STATE>_2025_Kharif_PMFBY.csv for every state
-# python .\pmfby_scraper_dashboard.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district
+# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district
 
-# # force everything into one shared file instead
-# python .\pmfby_scraper_dashboard.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output download_dashboard/all_states.csv
+# # force everything into one shared file instead--- not worling properly sometimes
+# python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
 
 
 
@@ -26,13 +26,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-DOWNLOAD_DIR = "download_dashboard"  # Directory to save CSV files
-
-
-def ensure_download_dir():
-    """Ensure the download directory exists."""
-    if not os.path.exists(DOWNLOAD_DIR):
-        os.makedirs(DOWNLOAD_DIR)
+MASTER_CSV = "pmfby_district_data_AP_29Oct26.csv"  # fallback name if no spec-based name applies
 
 
 def sanitize_filename_part(text: str) -> str:
@@ -50,7 +44,6 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
          pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
     Falls back to a state-less name (state-level summary run) like:
          pmfby_2025_Kharif_PMFBY.csv
-    Returns the path with download_dashboard directory prefix.
     """
     parts = ["pmfby"]
     if spec.state:
@@ -62,8 +55,7 @@ def build_csv_filename(spec, district: Optional[str] = None) -> str:
         sanitize_filename_part(spec.season),
         sanitize_filename_part(spec.scheme),
     ]
-    filename = "_".join(parts) + ".csv"
-    return os.path.join(DOWNLOAD_DIR, filename)
+    return "_".join(parts) + ".csv"
 
 # ---------------------------------------------------------------------------
 # SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
@@ -202,7 +194,6 @@ def extract_table_rows(driver):
     try:
         wait_visible(driver, SELECTORS["results_table"])
     except TimeoutException:
-        print("[WARNING] Table not found within timeout. Check selectors or page load.")
         return [], []
 
     time.sleep(1)
@@ -217,7 +208,6 @@ def extract_table_rows(driver):
 
     tbody = soup.find("tbody")
     if not tbody:
-        print("[WARNING] No tbody found in table. Table may be empty or structure has changed.")
         return headers, []
 
     rows = []
@@ -240,26 +230,11 @@ def row_names(driver) -> List[str]:
 # ---------------------------------------------------------------------------
 # CSV writer
 # ---------------------------------------------------------------------------
-def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv_path: str):
-    """
-    Append rows to a CSV file.
-    
-    Args:
-        spec: FilterSpec with year, season, scheme, state
-        headers: Column headers from the table
-        rows: Data rows to append
-        csv_path: Full path to the CSV file (required - no default)
-    """
+def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv_path=MASTER_CSV):
     meta_cols = ["Year", "Season", "Scheme", "State (selected)"]
     meta_vals = [spec.year, spec.season, spec.scheme, spec.state or ""]
 
     file_exists = os.path.exists(csv_path)
-    
-    # Validation: check if we have data to write
-    if not rows:
-        print(f"[WARNING] No rows to write to {csv_path}")
-        return
-    
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not file_exists:
@@ -276,38 +251,14 @@ def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv
 # High-level job runner
 # ---------------------------------------------------------------------------
 def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path: Optional[str] = None):
-    """
-    csv_path=None (default): auto-name the CSV per run from spec fields —
-        pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv (saved to download_dashboard folder)
-    csv_path="some_file.csv": use that exact name/path for every write
-        instead (all states appended into one shared file when combined
-        with --drill-to-district).
-
-    drill_to_district=False:
-        - if spec.state is None: scrape the state-level summary table (one
-          row per state).
-        - if spec.state is set: scrape that one state's district-level table.
-
-    drill_to_district=True:
-        - spec.state should be None. Loads the state-level table, gets every
-          state name, then re-navigates into each one and saves its
-          district-level table (one CSV per state, auto-named, unless
-          csv_path was explicitly given).
-    """
-    ensure_download_dir()
-    
     if not drill_to_district:
         navigate_to(driver, spec)
         headers, rows = extract_table_rows(driver)
-        
-        if not rows:
-            print(f"[ERROR] No data extracted for {spec.state or '(state-level summary)'}. Skipping.")
-            return
-        
-        out_path = build_csv_filename(spec)
+        headers, rows = drop_grand_total(headers, rows)  # <-- add this line
+        out_path = csv_path or build_csv_filename(spec)
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
-        print(f"✓ Saved {len(rows)} rows for {label} -> {out_path}")
+        print(f"Saved {len(rows)} rows for {label} -> {out_path}")
         return
 
     base_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=None)
@@ -315,23 +266,14 @@ def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path:
     state_names = row_names(driver)
     print(f"Found {len(state_names)} states")
 
-    if not state_names:
-        print("[ERROR] No states found. Check page selectors or network connectivity.")
-        return
-
     for state in state_names:
         state_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=state)
         navigate_to(driver, state_spec)
         headers, rows = extract_table_rows(driver)
-        
-        if not rows:
-            print(f"  [SKIP] {state}: No data extracted")
-            continue
-        
-        out_path = build_csv_filename(state_spec)
+        headers, rows = drop_grand_total(headers, rows)  # <-- and here
+        out_path = csv_path or build_csv_filename(state_spec)
         append_rows(state_spec, headers, rows, csv_path=out_path)
-        print(f"  ✓ {state}: {len(rows)} district rows -> {out_path}")
-
+        print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -353,7 +295,7 @@ def parse_args():
         "--output",
         default=None,
         help="CSV path to write to. If omitted, auto-generates a name like "
-             "pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv per state in the download_dashboard folder.",
+             "pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv per state.",
     )
     p.add_argument(
         "--headed",
@@ -361,6 +303,17 @@ def parse_args():
         help="Run with a visible browser window (debugging only).",
     )
     return p.parse_args()
+
+def drop_grand_total(headers, rows):
+    """Remove any row where the 'S. No' column has value 'Grand Total'."""
+    try:
+        idx = headers.index("S. No")
+    except ValueError:
+        # Column not found; nothing to drop
+        return headers, rows
+
+    filtered = [r for r in rows if len(r) > idx and r[idx] != "Grand Total"]
+    return headers, filtered
 
 
 if __name__ == "__main__":
@@ -376,6 +329,7 @@ if __name__ == "__main__":
     driver = make_driver(headless=not args.headed)
     try:
         run_job(driver, spec, drill_to_district=args.drill_to_district, csv_path=args.output)
+        
     finally:
         driver.quit()
 
