@@ -1,114 +1,61 @@
-name: PMFBY DATA DOWNLOAD
+name: Weekly PMFBY Scrape and Commit Timestamped CSV
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Every Monday at 09:00 UTC
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-on:
-  schedule:
-    # Runs every day at 11:00 IST (01:30 UTC)
-    - cron: '0 3 * * *'  
-
-  workflow_dispatch:
-
 jobs:
-
-  download:
-
+  scrape-and-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
-
-      # ==========================================
-      # Checkout repository
-      # ==========================================
-
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
-
-      # ==========================================
-      # Setup Python
-      # ==========================================
-
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-
-      # ==========================================
-      # Install Linux packages required by Camelot
-      # ==========================================
-
-      - name: Install System Packages
+      - name: Install browser and Python dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            ghostscript \
-            python3-tk \
-            libgl1
-
-
-      # ==========================================
-      # Install Python packages
-      # ==========================================
-
-      - name: Install Python Dependencies
-        run: |
+          sudo apt-get install -y chromium chromium-driver
+          sudo ln -sf /usr/bin/chromium /usr/bin/google-chrome
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install beautifulsoup4 selenium
 
+      - name: Generate timestamp
+        id: date
+        run: echo "ts=$(date -u +%Y_%m_%d)" >> "$GITHUB_OUTPUT"
 
-      # ==========================================
-      # Show repository structure
-      # ==========================================
-
-      - name: Show Repository Files
+      - name: Run PMFBY scraper
         run: |
-          pwd
-          ls -R
+          python pmfby_scraper_dashboard.py \
+            --year 2026 \
+            --season Kharif \
+            --scheme BOTH \
+            --drill-to-district \
+            --output "all_states_${{ steps.date.outputs.ts }}.csv"
 
-
-      # ==========================================
-      # Run PMFBY Dashboard download and conversion script
-      # ==========================================
-
-      - name: Run Weekly PMFBY Download Script
+      - name: Commit CSV to repository
         run: |
-          python pmfby_scraper_dashboard.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-
-      
-      # ==========================================
-      # Commit newly downloaded files
-      # ==========================================
-
-      - name: Commit Downloaded Files
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add downloads/
+          FILE_NAME="all_states_${{ steps.date.outputs.ts }}.csv"
+          git add "$FILE_NAME"
 
           if git diff --cached --quiet; then
-            echo "No new files to commit."
-            exit 0
+            echo "No changes to commit."
+          else
+            git commit -m "Add PMFBY data for ${{ steps.date.outputs.ts }}"
+            git push
           fi
-
-          git commit -m "Weekly PMFBY Update $(date +'%Y-%m-%d')"
-          git push
-
-
-      # ==========================================
-      # Upload downloads as workflow artifact
-      # ==========================================
-
-      - name: Upload Downloads
-        uses: actions/upload-artifact@v4
-        with:
-          name: PMFBY_Downloads
-          path: downloads/
-          retention-days: 360
