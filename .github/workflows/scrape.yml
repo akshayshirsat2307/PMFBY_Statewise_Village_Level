@@ -1,30 +1,25 @@
-name: Weekly PMFBY Scrape and Commit CSV in downloads folder
+name: PMFBY Weekly Scrape to Downloads Folder
 
 on:
   schedule:
-    - cron: '0 9 * * 1'
+    - cron: '0 9 * * 1'   # Every Monday at 09:00 UTC
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  scrape-and-commit:
+  scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install browser dependencies
+      - name: Install browser and Python dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium chromium-driver
@@ -32,29 +27,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install beautifulsoup4 selenium
 
-      - name: Prepare downloads folder
+      - name: Create downloads folder
         run: mkdir -p downloads
 
       - name: Run PMFBY scraper
         run: |
           python pmfby_scraper_dashboard.py \
             --year 2026 \
-            --season Rabi \
+            --season Kharif \
             --scheme BOTH \
             --drill-to-district \
             --output downloads/all_states.csv
 
-      - name: Commit CSV to repository
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add downloads/
-
-          if git diff --cached --quiet; then
-            echo "No new files to commit."
-            exit 0
-          fi
-
-          git commit -m "Weekly PMFBY Update $(date +'%Y-%m-%d')"
-          git push
+      - name: Upload CSV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmfby-downloads-csv
+          path: downloads/all_states.csv
+          if-no-files-found: error
