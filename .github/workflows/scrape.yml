@@ -92,7 +92,7 @@ jobs:
       - name: Show Downloaded Files
         run: |
           echo "Files available in downloads folder:"
-          ls -lh downloads/
+          ls -lh data/
 
 
       # ==========================================
