@@ -1,47 +1,140 @@
 name: PMFBY Weekly Scrape to Downloads Folder
 
+permissions:
+  contents: write
+
 on:
   schedule:
-    - cron: '0 9 * * 1'   # Every Monday at 09:00 UTC
+    # Runs every day at 07:00 IST (01:30 UTC)
+    - cron: '0 9 * * *'
+
   workflow_dispatch:
 
 jobs:
-  scrape:
+
+  download:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Set up Python
+      # ==========================================
+      # Checkout repository
+      # ==========================================
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+
+      # ==========================================
+      # Setup Python
+      # ==========================================
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install browser and Python dependencies
+
+      # ==========================================
+      # Install Linux packages required by Camelot
+      # ==========================================
+
+      - name: Install System Packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium chromium-driver
-          sudo ln -sf /usr/bin/chromium /usr/bin/google-chrome
+          sudo apt-get install -y \
+            ghostscript \
+            python3-tk \
+            libgl1
+
+
+      # ==========================================
+      # Install Python packages
+      # ==========================================
+
+      - name: Install Python Dependencies
+        run: |
           python -m pip install --upgrade pip
-          python -m pip install beautifulsoup4 selenium
+          python -m pip install -r requirements.txt
 
-      - name: Create downloads folder
-        run: mkdir -p downloads
 
-      - name: Run PMFBY scraper
+      # ==========================================
+      # Show repository structure
+      # ==========================================
+
+      - name: Show Repository Files
+        run: |
+          pwd
+          ls -R
+
+
+      # ==========================================
+      # Run IMD download and conversion script
+      # ==========================================
+
+      - name: Run Daily Download Script
         run: |
           python pmfby_scraper_dashboard.py \
             --year 2026 \
-            --season Rabi \
+            --season Kharif \
             --scheme BOTH \
             --drill-to-district \
             --output downloads/all_states.csv
 
-      - name: Upload CSV artifact
+
+      # ==========================================
+      # Show downloaded files
+      # ==========================================
+
+      - name: Show Downloaded Files
+        run: |
+          echo "Files available in downloads folder:"
+          ls -lh downloads/
+
+
+      # ==========================================
+      # Send Email
+      # ==========================================
+
+      - name: Send Daily IMD Email
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+        run: |
+          python mail_daily_district_rain.py
+
+
+      # ==========================================
+      # Commit newly downloaded files
+      # ==========================================
+
+      - name: Commit Downloaded Files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add downloads/
+
+          if git diff --cached --quiet; then
+            echo "No new files to commit."
+            exit 0
+          fi
+
+          git commit -m "Daily IMD Update $(date +'%Y-%m-%d')"
+          git push
+
+
+      # ==========================================
+      # Upload downloads as workflow artifact
+      # ==========================================
+
+      - name: Upload Downloads
         uses: actions/upload-artifact@v4
         with:
-          name: pmfby-downloads-csv
-          path: downloads/all_states.csv
-          if-no-files-found: error
+          name: IMD_Downloads
+          path: downloads/
+          retention-days: 30
