@@ -81,28 +81,7 @@ jobs:
           python pmfby_scraper_dashboard.py --year 2026 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
 
 
-      # ==========================================
-      # Show downloaded files
-      # ==========================================
-
-      - name: Show Downloaded Files
-        run: |
-          echo "Files available in downloads folder:"
-          ls -lh downloads/
-
-
-      # ==========================================
-      # Send Email
-      # ==========================================
-
-      - name: Send Daily IMD Email
-        env:
-          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
-          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-        run: |
-          python mail_daily_district_rain.py
-
-
+      
       # ==========================================
       # Commit newly downloaded files
       # ==========================================
