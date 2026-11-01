@@ -1,8 +1,8 @@
-name: Weekly PMFBY Scrape and Commit Timestamped CSV
+name: Weekly PMFBY Scrape and Commit CSV in downloads folder
 
 on:
   schedule:
-    - cron: '0 9 * * 1'   # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install browser and Python dependencies
+      - name: Install browser dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium chromium-driver
@@ -32,30 +32,29 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install beautifulsoup4 selenium
 
-      - name: Generate timestamp
-        id: date
-        run: echo "ts=$(date -u +%Y_%m_%d)" >> "$GITHUB_OUTPUT"
+      - name: Prepare downloads folder
+        run: mkdir -p downloads
 
       - name: Run PMFBY scraper
         run: |
           python pmfby_scraper_dashboard.py \
             --year 2026 \
-            --season Kharif \
+            --season Rabi \
             --scheme BOTH \
             --drill-to-district \
-            --output "all_states_${{ steps.date.outputs.ts }}.csv"
+            --output downloads/all_states.csv
 
       - name: Commit CSV to repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          FILE_NAME="all_states_${{ steps.date.outputs.ts }}.csv"
-          git add "$FILE_NAME"
+          git add downloads/
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Add PMFBY data for ${{ steps.date.outputs.ts }}"
-            git push
+            echo "No new files to commit."
+            exit 0
           fi
+
+          git commit -m "Weekly PMFBY Update $(date +'%Y-%m-%d')"
+          git push
