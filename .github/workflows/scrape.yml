@@ -12,6 +12,8 @@ jobs:
   scrape-and-commit:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout repository
@@ -28,7 +30,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium chromium-driver
-          sudo ln -sf /usr/bin/chromium /usr/bin/google-chrome
+          chromium --version
+          chromedriver --version
+
           python -m pip install --upgrade pip
           python -m pip install beautifulsoup4 selenium
 
@@ -36,9 +40,10 @@ jobs:
         run: |
           python pmfby_scraper_dashboard.py \
             --year 2026 \
-            --season Kharif \
+            --season Rabi \
             --scheme BOTH \
-            --drill-to-district
+            --drill-to-district \
+            --retries 3
 
       - name: Commit CSV files in data folder
         run: |
@@ -52,5 +57,5 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Weekly PMFBY data update $(date +'%Y-%m-%d')"
+          git commit -m "Weekly PMFBY data update $(date -u +'%Y-%m-%d')"
           git push
