@@ -10,100 +10,76 @@
 # # force everything into one shared file instead--- not worling properly sometimes
 # python .\PMFBY_Dashboard_State_Data_Download_V4.py --year 2025 --season Kharif --scheme PMFBY --drill-to-district --output all_states.csv
 
+# python .\PMFBY_Dashboard_State_Data_Download_V5.py --year 2025 --season Kharif --scheme BOTH --drill-to-district --output all_states.csv
 
 
+# Working fine for both PMFBY and WBCIS schemes, and also for BOTH schemes together.
+
+
+import argparse
 import csv
 import os
+import re
 import time
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import List, Optional
 
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.support.ui import Select, WebDriverWait
 
 DASHBOARD_URL = "https://pmfby.gov.in/adminStatistics/dashboard"
-MASTER_CSV = "pmfby_district_data_AP_29Oct26.csv"  # fallback name if no spec-based name applies
+dt = time.strftime("%Y%m%d_%H%M%S")
+MASTER_CSV = f"pmfby_district_data{dt}.csv"
+WAIT_SECONDS = 20
 
-
-def sanitize_filename_part(text: str) -> str:
-    """Make a string safe to use inside a filename (spaces -> underscores,
-    strip anything that isn't alnum/underscore/hyphen)."""
-    import re
-    text = text.strip().replace(" ", "_")
-    return re.sub(r"[^A-Za-z0-9_\-]", "", text)
-
-
-def build_csv_filename(spec, district: Optional[str] = None) -> str:
-    """Builds a filename like:
-         pmfby_ANDHRA_PRADESH_2025_Kharif_PMFBY.csv
-    or, if a single district is also known:
-         pmfby_ANDHRA_PRADESH_GUNTUR_2025_Kharif_PMFBY.csv
-    Falls back to a state-less name (state-level summary run) like:
-         pmfby_2025_Kharif_PMFBY.csv
-    """
-    parts = ["pmfby"]
-    if spec.state:
-        parts.append(sanitize_filename_part(spec.state))
-    if district:
-        parts.append(sanitize_filename_part(district))
-    parts += [
-        sanitize_filename_part(spec.year),
-        sanitize_filename_part(spec.season),
-        sanitize_filename_part(spec.scheme),
-    ]
-    return "_".join(parts) + ".csv"
-
-# ---------------------------------------------------------------------------
-# SELECTORS — confirmed against real page HTML (debug_page_after_click.html)
-# ---------------------------------------------------------------------------
 SELECTORS = {
-    # The "State Wise Report" link is a client-side React state toggle, not
-    # a real navigation (href points at the same URL). Must click it before
-    # any of the Year/Season/Scheme selects exist in the DOM.
     "state_wise_report_link": '//a[@title="State Wise Report"]',
-
-    # Confirmed real <select class="form-control"> elements, each preceded
-    # by a sibling <label>. These only appear AFTER state_wise_report_link
-    # has been clicked.
     "year_dropdown": '//label[normalize-space()="Year"]/following-sibling::select',
     "season_dropdown": '//label[normalize-space()="Season"]/following-sibling::select',
     "scheme_dropdown": '//label[normalize-space()="Scheme"]/following-sibling::select',
-
-    # There is NO State or District <select>. States are rows in the results
-    # table; each state name is a clickable <a title="STATE NAME"> with no
-    # href (JS onClick). Clicking one swaps the table to that state's
-    # districts — already the granularity we want, no further click needed.
     "row_link_by_title": 'a[title="{name}"]',
-
     "results_table": "table.adminStatics__dashboardTableDT___1cEkH",
-    "results_count_text": "p.adminStatics__resultText___2ilrx",  # "Showing Result: N"
+    "results_count_text": "p.adminStatics__resultText___2ilrx",
 }
 
-# Season and Scheme dropdowns use coded <option value="..">, not their
-# visible label — confirmed from the copied HTML.
 SEASON_CODES = {"Kharif": "01", "Rabi": "02"}
 SCHEME_CODES = {"PMFBY": "04", "WBCIS": "02"}
-
-WAIT_SECONDS = 20
 
 
 @dataclass
 class FilterSpec:
     year: str
-    season: str          # "Kharif" or "Rabi"
-    scheme: str           # "PMFBY" or "WBCIS"
-    state: Optional[str] = None   # None = scrape the state-level summary table
+    season: str
+    scheme: str
+    state: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# Browser setup
-# ---------------------------------------------------------------------------
+def sanitize_filename_part(text: str) -> str:
+    text = text.strip().replace(" ", "_")
+    return re.sub(r"[^A-Za-z0-9_-]", "", text)
+
+
+def build_csv_filename(spec: FilterSpec, district: Optional[str] = None) -> str:
+    parts = ["pmfby"]
+    if spec.state:
+        parts.append(sanitize_filename_part(spec.state))
+    if district:
+        parts.append(sanitize_filename_part(district))
+    parts.extend([
+        sanitize_filename_part(spec.year),
+        sanitize_filename_part(spec.season),
+        sanitize_filename_part(spec.scheme),
+    ])
+    return "_".join(parts) + ".csv"
+
+
 def make_driver(headless: bool = True):
     from selenium.webdriver.chrome.options import Options
+
     opts = Options()
     if headless:
         opts.add_argument("--headless=new")
@@ -133,23 +109,46 @@ def wait_clickable(driver, selector, timeout=WAIT_SECONDS):
     )
 
 
-# ---------------------------------------------------------------------------
-# Navigation
-# ---------------------------------------------------------------------------
 def select_dropdown_by_value(driver, selector, value):
     el = wait_visible(driver, selector)
     Select(el).select_by_value(value)
-    time.sleep(1.5)  # allow the table to refresh after the filter change
+    time.sleep(1.5)
 
 
 def click_row_link_by_title(driver, name):
-    css = SELECTORS["row_link_by_title"].format(name=name)
-    el = wait_clickable(driver, css)
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+
+    el = WebDriverWait(driver, WAIT_SECONDS).until(
+        lambda d: d.execute_script(
+            """
+            const table = document.querySelector(
+                'table.adminStatics__dashboardTableDT___1cEkH'
+            );
+
+            if (!table) return null;
+
+            return Array.from(
+                table.querySelectorAll('tbody a[title]')
+            ).find(
+                a => (a.getAttribute('title') || '').trim() === arguments[0]
+            ) || null;
+            """,
+            name,
+        )
+    )
+
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block:'center'});",
+        el
+    )
+
     try:
         el.click()
     except Exception:
-        driver.execute_script("arguments[0].click();", el)
+        driver.execute_script(
+            "arguments[0].click();",
+            el
+        )
+
     time.sleep(1.5)
 
 
@@ -159,9 +158,7 @@ def navigate_to(driver, spec: FilterSpec):
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
 
-    # Must click this BEFORE the Year/Season/Scheme selects exist in the DOM.
-    report_link = wait_clickable(driver, SELECTORS["state_wise_report_link"])
-    report_link.click()
+    wait_clickable(driver, SELECTORS["state_wise_report_link"]).click()
     time.sleep(2)
 
     select_dropdown_by_value(driver, SELECTORS["year_dropdown"], spec.year)
@@ -173,21 +170,7 @@ def navigate_to(driver, spec: FilterSpec):
     )
 
     if spec.state:
-        # Clicking the state name swaps the table from "all states" to
-        # "all districts within this state" — this IS the district-level
-        # data, no further click required.
         click_row_link_by_title(driver, spec.state)
-
-
-# ---------------------------------------------------------------------------
-# Table extraction
-# ---------------------------------------------------------------------------
-def get_results_count(driver) -> Optional[str]:
-    try:
-        el = driver.find_element(By.CSS_SELECTOR, SELECTORS["results_count_text"])
-        return el.text.strip()
-    except NoSuchElementException:
-        return None
 
 
 def extract_table_rows(driver):
@@ -198,13 +181,8 @@ def extract_table_rows(driver):
 
     time.sleep(1)
     table_el = driver.find_element(By.CSS_SELECTOR, SELECTORS["results_table"])
-    html = table_el.get_attribute("outerHTML")
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Column headers — dashboard has a two-row <thead> with rowspan/colspan,
-    # so just grab all <th> text in document order as a best-effort header
-    # list (used for reference; CSV writer below uses positional data).
-    headers = [th.get_text(strip=True) for th in soup.select("thead th")]
+    soup = BeautifulSoup(table_el.get_attribute("outerHTML"), "html.parser")
+    headers = [th.get_text(" ", strip=True) for th in soup.select("thead th")]
 
     tbody = soup.find("tbody")
     if not tbody:
@@ -214,122 +192,170 @@ def extract_table_rows(driver):
     for tr in tbody.find_all("tr"):
         vals = []
         for td in tr.find_all("td"):
-            a = td.find("a")
-            vals.append(a.get("title") if a else td.get_text(strip=True))
-        rows.append(vals)
+            anchor = td.find("a")
+            vals.append(anchor.get("title") if anchor and anchor.get("title") else td.get_text(" ", strip=True))
+        if vals:
+            rows.append(vals)
     return headers, rows
 
 
 def row_names(driver) -> List[str]:
-    """Names (2nd column) of every row in the currently visible table —
-    used to enumerate every state to loop into."""
-    _, rows = extract_table_rows(driver)
-    return [r[1] for r in rows if len(r) > 1 and r[1]]
+    """
+    Return only real clickable state names from the results table.
+
+    This prevents total/count values such as 60, 41, 467, 151, etc.
+    from being incorrectly treated as state names.
+    """
+
+    wait_visible(driver, SELECTORS["results_table"])
+
+    table = driver.find_element(
+        By.CSS_SELECTOR,
+        SELECTORS["results_table"]
+    )
+
+    links = table.find_elements(
+        By.CSS_SELECTOR,
+        "tbody a[title]"
+    )
+
+    states = []
+
+    for link in links:
+        name = (link.get_attribute("title") or "").strip()
+
+        # Keep only values containing alphabetic characters.
+        # This removes numeric totals such as 60 and 41.
+        if name and any(char.isalpha() for char in name):
+
+            if name not in states:
+                states.append(name)
+
+    return states
+
+def drop_grand_total(headers, rows):
+    # Robust against merged headers and dashboard variations.
+    filtered = [
+        row for row in rows
+        if not any(str(cell).strip().lower() == "grand total" for cell in row)
+    ]
+    return headers, filtered
 
 
-# ---------------------------------------------------------------------------
-# CSV writer
-# ---------------------------------------------------------------------------
 def append_rows(spec: FilterSpec, headers: List[str], rows: List[List[str]], csv_path=MASTER_CSV):
+    if not rows:
+        return
+
     meta_cols = ["Year", "Season", "Scheme", "State (selected)"]
     meta_vals = [spec.year, spec.season, spec.scheme, spec.state or ""]
+    max_cols = max(len(row) for row in rows)
 
-    file_exists = os.path.exists(csv_path)
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+    # Merged dashboard headers often do not equal the actual data-column count.
+    data_headers = headers if len(headers) == max_cols else [f"Col{i + 1}" for i in range(max_cols)]
+
+    file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
+    with open(csv_path, "a", newline="", encoding="utf-8-sig") as file:
+        writer = csv.writer(file)
         if not file_exists:
-            # Fall back to generic numbered columns if header count doesn't
-            # line up with actual row length (merged/rowspan headers can
-            # cause this on complex dashboard tables).
-            data_headers = headers if headers else [f"Col{i}" for i in range(len(rows[0]) if rows else 0)]
             writer.writerow(meta_cols + data_headers)
-        for r in rows:
-            writer.writerow(meta_vals + r)
+        for row in rows:
+            writer.writerow(meta_vals + row + [""] * (max_cols - len(row)))
 
 
-# ---------------------------------------------------------------------------
-# High-level job runner
-# ---------------------------------------------------------------------------
-def run_job(driver, spec: FilterSpec, drill_to_district: bool = False, csv_path: Optional[str] = None):
+def run_single_scheme_job(
+    driver,
+    spec: FilterSpec,
+    drill_to_district: bool = False,
+    csv_path: Optional[str] = None,
+):
     if not drill_to_district:
         navigate_to(driver, spec)
         headers, rows = extract_table_rows(driver)
-        headers, rows = drop_grand_total(headers, rows)  # <-- add this line
+        headers, rows = drop_grand_total(headers, rows)
         out_path = csv_path or build_csv_filename(spec)
         append_rows(spec, headers, rows, csv_path=out_path)
         label = spec.state or "(state-level summary)"
-        print(f"Saved {len(rows)} rows for {label} -> {out_path}")
+        print(f"Saved {len(rows)} rows for {label}, {spec.scheme} -> {out_path}")
         return
 
-    base_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=None)
+    base_spec = FilterSpec(spec.year, spec.season, spec.scheme, None)
     navigate_to(driver, base_spec)
-    state_names = row_names(driver)
-    print(f"Found {len(state_names)} states")
+    states = row_names(driver)
+    print(f"[{spec.scheme}] Found {len(states)} states")
 
-    for state in state_names:
-        state_spec = FilterSpec(year=spec.year, season=spec.season, scheme=spec.scheme, state=state)
-        navigate_to(driver, state_spec)
-        headers, rows = extract_table_rows(driver)
-        headers, rows = drop_grand_total(headers, rows)  # <-- and here
-        out_path = csv_path or build_csv_filename(state_spec)
-        append_rows(state_spec, headers, rows, csv_path=out_path)
-        print(f"  Saved {state}: {len(rows)} district rows -> {out_path}")
+    for state in states:
+        try:
+            state_spec = FilterSpec(spec.year, spec.season, spec.scheme, state)
+            navigate_to(driver, state_spec)
+            headers, rows = extract_table_rows(driver)
+            headers, rows = drop_grand_total(headers, rows)
+            out_path = csv_path or build_csv_filename(state_spec)
+            append_rows(state_spec, headers, rows, csv_path=out_path)
+            print(f"  [{spec.scheme}] Saved {state}: {len(rows)} district rows -> {out_path}")
+        except Exception as exc:
+            print(f"  [{spec.scheme}] FAILED {state}: {exc}")
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+
+def normalize_schemes(raw_scheme: str) -> List[str]:
+    value = raw_scheme.strip().upper().replace(" ", "")
+    if value in {"BOTH", "ALL", "PMFBY&WBCIS", "WBCIS&PMFBY", "PMFBY+WBCIS", "WBCIS+PMFBY"}:
+        return ["PMFBY", "WBCIS"]
+    if value in SCHEME_CODES:
+        return [value]
+    raise argparse.ArgumentTypeError(
+        "--scheme must be PMFBY, WBCIS, BOTH, or PMFBY&WBCIS"
+    )
+
+
 def parse_args():
-    import argparse
-
-    p = argparse.ArgumentParser(description="Scrape PMFBY admin statistics dashboard (State/District level)")
-    p.add_argument("--year", required=True, help="e.g. 2025")
-    p.add_argument("--season", required=True, choices=["Kharif", "Rabi"])
-    p.add_argument("--scheme", required=True, choices=["PMFBY", "WBCIS"])
-    p.add_argument("--state", default=None, help="e.g. 'ANDHRA PRADESH' (omit for the state-level summary, or use --drill-to-district for all states)")
-    p.add_argument(
+    parser = argparse.ArgumentParser(
+        description="Scrape PMFBY admin statistics dashboard at state/district level"
+    )
+    parser.add_argument("--year", required=True, help="Example: 2025")
+    parser.add_argument("--season", required=True, choices=["Kharif", "Rabi"])
+    parser.add_argument(
+        "--scheme",
+        required=True,
+        help='PMFBY, WBCIS, BOTH, or "PMFBY&WBCIS"',
+    )
+    parser.add_argument("--state", default=None, help='Example: "ANDHRA PRADESH"')
+    parser.add_argument(
         "--drill-to-district",
         action="store_true",
-        help="Ignore --state; loop through every state and save its district-level table.",
+        help="Loop through every state and save district-level tables",
     )
-    p.add_argument(
+    parser.add_argument(
         "--output",
         default=None,
-        help="CSV path to write to. If omitted, auto-generates a name like "
-             "pmfby_<STATE>_<YEAR>_<SEASON>_<SCHEME>.csv per state.",
+        help="Shared CSV output. When omitted, one file is generated per state and scheme",
     )
-    p.add_argument(
-        "--headed",
-        action="store_true",
-        help="Run with a visible browser window (debugging only).",
-    )
-    return p.parse_args()
-
-def drop_grand_total(headers, rows):
-    """Remove any row where the 'S. No' column has value 'Grand Total'."""
-    try:
-        idx = headers.index("S. No")
-    except ValueError:
-        # Column not found; nothing to drop
-        return headers, rows
-
-    filtered = [r for r in rows if len(r) > idx and r[idx] != "Grand Total"]
-    return headers, filtered
+    parser.add_argument("--headed", action="store_true")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    schemes = normalize_schemes(args.scheme)
 
-    spec = FilterSpec(
-        year=args.year,
-        season=args.season,
-        scheme=args.scheme,
-        state=args.state,
-    )
+    if args.drill_to_district and args.state:
+        print("Note: --state is ignored because --drill-to-district was supplied.")
 
     driver = make_driver(headless=not args.headed)
     try:
-        run_job(driver, spec, drill_to_district=args.drill_to_district, csv_path=args.output)
-        
+        for scheme in schemes:
+            print(f"\nStarting scheme: {scheme}")
+            spec = FilterSpec(
+                year=args.year,
+                season=args.season,
+                scheme=scheme,
+                state=None if args.drill_to_district else args.state,
+            )
+            run_single_scheme_job(
+                driver,
+                spec,
+                drill_to_district=args.drill_to_district,
+                csv_path=args.output,
+            )
     finally:
         driver.quit()
 
