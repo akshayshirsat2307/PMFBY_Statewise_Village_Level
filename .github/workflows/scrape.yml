@@ -34,7 +34,7 @@ jobs:
         run: |
           python pmfby_scraper_dashboard.py \
             --year 2026 \
-            --season Kharif \
+            --season Rabi \
             --scheme BOTH \
             --drill-to-district \
             --output downloads/all_states.csv
